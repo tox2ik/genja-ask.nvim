@@ -1,5 +1,5 @@
 -- Ask popup (idea 16): one quick question, a short plain-text answer in the same float.
---   <M-?> (normal, insert, visual: selection attached), <leader>pC: open (plugin/ask.lua, plugin/claude-fterm.lua in the config)
+--   <M-?> (normal, insert, visual: selection attached), <leader>pc: open (plugin/ask.lua, plugin/claude-fterm.lua in the config)
 --   compose:  <C-CR> send · <M-p> send to the claudefterm · <S-CR>/<C-j> newline · <C-p>/<C-n> history · <C-b> brief
 --             <M-t> target · <M-m> model · <M-e> effort · <M-s> save session · <M-r> resume saved
 --             <Esc>/q (normal) close, the draft is kept

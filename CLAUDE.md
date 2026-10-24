@@ -3,7 +3,7 @@
 Ask popup (idea 16): one quick question, a short plain-text answer in the same
 float. Loaded from disk by the config's `../../lua/lazyp/new/genja-ask.lua`
 (`dir =` spec, no trigger: it loads on the first `require('genja-ask')` from
-`<M-?>` in `plugin/ask.lua` and `<leader>pC` in `plugin/claude-fterm.lua`).
+`<M-?>` in `plugin/ask.lua` and `<leader>pc` in `plugin/claude-fterm.lua`).
 
 How this file is kept: one heading per feature, one bullet per decision.
 Unmarked bullets were stated by jaro. `(inferred)` marks Claude's reading of the
