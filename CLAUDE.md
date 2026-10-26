@@ -19,6 +19,7 @@ code or history: confirm or delete. `Hint:` is a working note for Claude.
 
 - The floaterm backend is named `claudefterm`, like `:ClaudeFterm`.
 - `<M-p>` in the popup sends to the claudefterm, whatever the target.
+- `<C-CR>`, `<M-CR>` and `<C-s>` send: `<C-CR>` doesn't reach nvim through Windows Terminal. The footer shows `<C-s>`.
 - Mappings stay in the config.
 - The plugin requires no `genja.*` module: the claudefterm backend calls `opts.send(prompt, run)` from `setup()`, set in the config's spec.
 - `send` gets the whole `genja-ask.RunOpts` (model, effort, cwd, ...), so the caller maps the popup's choices itself; the spec turns model and effort into `--model` / `--effort` for `genja-claudefterm.send(text, flags)`.

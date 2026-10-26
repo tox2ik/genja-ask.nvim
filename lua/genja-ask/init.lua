@@ -1,6 +1,6 @@
 -- Ask popup (idea 16): one quick question, a short plain-text answer in the same float.
 --   <M-?> (normal, insert, visual: selection attached), <leader>pc: open (plugin/ask.lua, plugin/claude-fterm.lua in the config)
---   compose:  <C-CR> send · <M-p> send to the claudefterm · <S-CR>/<C-j> newline · <C-p>/<C-n> history · <C-b> brief
+--   compose:  <C-CR>/<M-CR>/<C-s> send · <M-p> send to the claudefterm · <S-CR>/<C-j> newline · <C-p>/<C-n> history · <C-b> brief
 --             <M-t> target · <M-m> model · <M-e> effort · <M-s> save session · <M-r> resume saved
 --             <Esc>/q (normal) close, the draft is kept
 --   waiting:  <C-c> cancel
@@ -264,7 +264,7 @@ function M.open()
 		if session.resume or #transcript > 0 then
 			title = title .. ' [follow-up]'
 		end
-		local footer = ' <C-CR> send · <M-p> to claudefterm · <M-t> target · <M-m> model · <M-e> effort · <M-s> save · <M-r> resume · <C-b> brief '
+		local footer = ' <C-s> send · <M-p> to claudefterm · <M-t> target · <M-m> model · <M-e> effort · <M-s> save · <M-r> resume · <C-b> brief '
 		if mode == 'wait' then
 			footer = ' <C-c> cancel '
 		elseif mode == 'answer' then
@@ -502,7 +502,10 @@ function M.open()
 			end
 		end
 	end
-	vim.keymap.set({ 'i', 'n' }, '<C-CR>', in_compose(function() send() end), o 'Ask: send')
+	-- <C-CR> doesn't reach nvim through Windows Terminal; <M-CR> and <C-s> do
+	for _, lhs in ipairs({ '<C-CR>', '<M-CR>', '<C-s>' }) do
+		vim.keymap.set({ 'i', 'n' }, lhs, in_compose(function() send() end), o 'Ask: send')
+	end
 	local function send_claudefterm()
 		send(require('genja-ask.backends.claudefterm'))
 	end
