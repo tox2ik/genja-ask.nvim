@@ -11,12 +11,19 @@
 
 local SRC = 'genja-ask/init.lua: '
 
+local float = require('genja-util.float')
+
 ---@class genja-ask
 local M = {}
 
 local BRIEF = 'Answer briefly: at most 3 short sentences.\n\n'
 local HISTORY_MAX = 50
 local LOG = vim.fs.normalize('~/.claude/p-logs/nvim.log')
+local FOOTER = {
+	compose = ' <C-s> send · <M-p> to claudefterm · <M-t> target · <M-m> model · <M-e> effort · <M-s> save · <M-r> resume · <C-b> brief ',
+	wait = ' <C-c> cancel ',
+	answer = ' <CR> follow-up · y yank · q close ',
+}
 
 ---@class genja-ask.RunOpts
 ---@field model string|nil
@@ -75,15 +82,11 @@ local state = {
 ---Random version 4 UUID, for `claude --session-id`.
 ---@return string
 local function new_uuid()
-	local bytes = { assert(vim.uv.random(16)):byte(1, 16) }
-	bytes[7] = bytes[7] % 16 + 0x40
-	bytes[9] = bytes[9] % 64 + 0x80
-	local hex = ''
-	for _, b in ipairs(bytes) do
-		hex = hex .. string.format('%02x', b)
-	end
-	return hex:sub(1, 8) .. '-' .. hex:sub(9, 12) .. '-' .. hex:sub(13, 16) .. '-'
-		.. hex:sub(17, 20) .. '-' .. hex:sub(21, 32)
+	local b = { assert(vim.uv.random(16)):byte(1, 16) }
+	b[7] = b[7] % 16 + 0x40 -- version 4
+	b[9] = b[9] % 64 + 0x80 -- variant 10xx
+	local hex = ('%02x'):rep(16):format(unpack(b))
+	return ('%s-%s-%s-%s-%s'):format(hex:sub(1, 8), hex:sub(9, 12), hex:sub(13, 16), hex:sub(17, 20), hex:sub(21))
 end
 
 ---Session name like the pwsh claude-p's: ISO year . week . weekday-name . HHMM.
@@ -100,11 +103,7 @@ local function project_root()
 	if name ~= '' and vim.bo.buftype == '' then
 		dir = vim.fs.dirname(name)
 	end
-	local root = vim.fs.root(dir, '.git')
-	if not root then
-		root = vim.fn.getcwd()
-	end
-	return vim.fs.normalize(root)
+	return vim.fs.normalize(vim.fs.root(dir, '.git') or vim.fn.getcwd())
 end
 
 ---The visual selection as `path:first-last` plus a fenced block, and its label.
@@ -121,16 +120,13 @@ local function selection(root)
 	if file == '' or vim.bo.buftype ~= '' then
 		return nil, nil
 	end
-	local rel = vim.fs.relpath(root, file)
-	if not rel then
-		rel = vim.fs.normalize(file)
-	end
-	local label = rel .. ':' .. first .. '-' .. last
+	local label = (vim.fs.relpath(root, file) or vim.fs.normalize(file)) .. ':' .. first .. '-' .. last
 	local code = table.concat(vim.api.nvim_buf_get_lines(0, first - 1, last, false), '\n')
+	-- a fence longer than any backtick run inside the code
 	local ticks = '```'
 	for run in code:gmatch('`+') do
 		if #run >= #ticks then
-			ticks = string.rep('`', #run + 1)
+			ticks = ('`'):rep(#run + 1)
 		end
 	end
 	return label .. '\n' .. ticks .. vim.bo.filetype .. '\n' .. code .. '\n' .. ticks .. '\n\n', label
@@ -142,12 +138,12 @@ end
 ---@param answer string
 local function log(backend, prompt, answer)
 	vim.fn.mkdir(vim.fs.dirname(LOG), 'p')
-	local entry = {
+	local text = table.concat({
 		'## ' .. os.date('%Y-%m-%d %H:%M') .. ' (' .. backend .. ')', '',
 		'**Q:** ' .. prompt, '',
 		answer, '', '---', '',
-	}
-	local text = table.concat(entry, '\n')
+	}, '\n')
+	-- prompt and answer span lines; writefile wants one item per line
 	vim.fn.writefile(vim.split(text, '\n', { plain = true }), LOG, 'a')
 end
 
@@ -156,36 +152,30 @@ end
 ---@param idx integer|nil
 ---@return string|nil
 local function pick(list, idx)
-	if #list == 0 then
-		return nil
-	end
 	return list[idx or 1]
 end
 
----Saved claude-p sessions named `nvim ...`, newest last: { name, id }.
+---Saved claude-p sessions named `nvim ...`, sorted by name: { name, id }.
 ---@return { name: string, id: string }[]
 local function saved_sessions()
-	local dir = vim.fs.normalize('~/.claude/projects')
 	if vim.fn.executable('rg') == 0 then
 		vim.notify(SRC .. 'resume needs rg on PATH', vim.log.levels.WARN)
 		return {}
 	end
+	local dir = vim.fs.normalize('~/.claude/projects')
 	local res = vim.system({ 'rg', '--no-filename', '-F', '"type":"custom-title"', '-g', '*.jsonl', dir }, { text = true }):wait()
+	-- a renamed session has several title lines; the last one wins
 	local by_id = {}
-	local order = {}
 	for line in (res.stdout or ''):gmatch('[^\n]+') do
 		local ok, entry = pcall(vim.json.decode, line)
 		if ok and type(entry) == 'table' and type(entry.customTitle) == 'string'
 			and entry.customTitle:match('^nvim ') and type(entry.sessionId) == 'string' then
-			if not by_id[entry.sessionId] then
-				table.insert(order, entry.sessionId)
-			end
 			by_id[entry.sessionId] = entry.customTitle
 		end
 	end
 	local list = {}
-	for _, id in ipairs(order) do
-		table.insert(list, { name = by_id[id], id = id })
+	for id, name in pairs(by_id) do
+		table.insert(list, { name = name, id = id })
 	end
 	table.sort(list, function(a, b) return a.name < b.name end)
 	return list
@@ -195,8 +185,7 @@ end
 ---Open the popup; in visual mode the selection goes along.
 function M.open()
 	local root = project_root()
-	local context = nil
-	local label = nil
+	local context, label
 	if vim.fn.mode():match('^[vV\22]') then
 		context, label = selection(root)
 	end
@@ -209,25 +198,10 @@ function M.open()
 	local job = nil
 	local closed = false
 
-	local buf = vim.api.nvim_create_buf(false, true)
-	vim.bo[buf].bufhidden = 'wipe'
+	local buf = float.scratch(state.draft)
 	vim.bo[buf].filetype = 'markdown'
-	if state.draft then
-		vim.api.nvim_buf_set_lines(buf, 0, -1, false, state.draft)
-	end
-	local width = math.min(90, vim.o.columns - 4)
 	local height = math.min(8, vim.o.lines - vim.o.cmdheight - 4)
-	local win = vim.api.nvim_open_win(buf, true, {
-		relative = 'editor',
-		width = width,
-		height = math.max(height, 1),
-		row = math.max(math.floor((vim.o.lines - height) / 2) - 3, 0),
-		col = math.max(math.floor((vim.o.columns - width) / 2) - 8, 0),
-		style = 'minimal',
-		border = 'rounded',
-		title = '',
-		title_pos = 'center',
-	})
+	local win = float.open(buf, { width = math.min(90, vim.o.columns - 4), height = height, up = 3, left = 8 })
 	vim.wo[win].wrap = true
 	local ok_cmp, cmp = pcall(require, 'cmp')
 	if ok_cmp then
@@ -244,10 +218,8 @@ function M.open()
 			return
 		end
 		local b = backend()
-		local parts = { b.name }
-		local model = pick(b.models, state.model[b.name])
+		local parts = { b.name, pick(b.models, state.model[b.name]) or 'default' }
 		local effort = pick(b.efforts, state.effort[b.name])
-		table.insert(parts, model or 'default')
 		if effort then
 			table.insert(parts, effort)
 		end
@@ -264,13 +236,7 @@ function M.open()
 		if session.resume or #transcript > 0 then
 			title = title .. ' [follow-up]'
 		end
-		local footer = ' <C-s> send · <M-p> to claudefterm · <M-t> target · <M-m> model · <M-e> effort · <M-s> save · <M-r> resume · <C-b> brief '
-		if mode == 'wait' then
-			footer = ' <C-c> cancel '
-		elseif mode == 'answer' then
-			footer = ' <CR> follow-up · y yank · q close '
-		end
-		vim.api.nvim_win_set_config(win, { title = title .. ' ', title_pos = 'center', footer = footer, footer_pos = 'center' })
+		vim.api.nvim_win_set_config(win, { title = title .. ' ', title_pos = 'center', footer = FOOTER[mode], footer_pos = 'center' })
 	end
 
 	local function close()
@@ -280,17 +246,12 @@ function M.open()
 		closed = true
 		if mode == 'compose' and vim.api.nvim_buf_is_valid(buf) then
 			local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-			state.draft = lines
-			if vim.trim(table.concat(lines, '\n')) == '' then
-				state.draft = nil
+			state.draft = nil
+			if vim.trim(table.concat(lines, '\n')) ~= '' then
+				state.draft = lines
 			end
 		end
-		if vim.api.nvim_get_current_win() == win then
-			vim.cmd.stopinsert()
-		end
-		if vim.api.nvim_win_is_valid(win) then
-			vim.api.nvim_win_close(win, true)
-		end
+		float.close(win)
 	end
 
 	---Show `lines` read-only and grow the float to fit.
@@ -301,7 +262,7 @@ function M.open()
 		end
 		vim.bo[buf].modifiable = true
 		vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-		vim.bo[buf].modifiable = mode == 'compose'
+		vim.bo[buf].modifiable = (mode == 'compose')
 		local h = math.min(math.max(#lines + 1, height), vim.o.lines - vim.o.cmdheight - 6)
 		vim.api.nvim_win_set_config(win, { height = math.max(h, 1) })
 		vim.api.nvim_win_set_cursor(win, { 1, 0 })
@@ -328,10 +289,7 @@ function M.open()
 			table.remove(state.history, 1)
 		end
 
-		local b = backend()
-		if target then
-			b = target
-		end
+		local b = target or backend()
 		local full = prompt
 		if context then
 			full = context .. full
@@ -350,15 +308,12 @@ function M.open()
 		end
 
 		local q_lines = vim.split('Q: ' .. prompt, '\n', { plain = true })
+		mode = 'wait' -- before close(): no draft is kept
 		if b.sync then
-			-- the answer shows in the claudefterm
-			mode = 'wait'
-			close()
+			close() -- the answer shows in the claudefterm
 		end
-		mode = 'wait'
 		vim.cmd.stopinsert()
-		local waiting = vim.list_extend(vim.deepcopy(q_lines), { '', '… waiting for ' .. b.name })
-		show(waiting)
+		show(vim.list_extend(vim.deepcopy(q_lines), { '', '… waiting for ' .. b.name }))
 		decorate()
 
 		local opts = {
@@ -391,36 +346,32 @@ function M.open()
 			mode = 'answer'
 			local lines = vim.deepcopy(q_lines)
 			table.insert(lines, '')
-			vim.list_extend(lines, vim.split(vim.trim(body), '\n', { plain = true }))
-			show(lines)
+			show(vim.list_extend(lines, vim.split(vim.trim(body), '\n', { plain = true })))
 			decorate()
 		end)
 	end
 
 	local function cancel()
-		if job then
-			job:kill(15)
-			job = nil
-			mode = 'answer'
-			show({ '(cancelled)' })
-			decorate()
+		if not job then
+			return
 		end
+		job:kill(15)
+		job = nil
+		mode = 'answer'
+		show({ '(cancelled)' })
+		decorate()
 	end
 
 	---Cycle a backend list choice (<M-m> model, <M-e> effort).
 	---@param what 'model'|'effort'
 	local function cycle(what)
 		local b = backend()
-		local list = b.models
-		if what == 'effort' then
-			list = b.efforts
-		end
+		local list = (what == 'effort' and b.efforts or b.models)
 		if #list == 0 then
 			vim.notify(SRC .. b.name .. ' has no ' .. what .. ' choice', vim.log.levels.INFO)
 			return
 		end
-		local idx = (state[what][b.name] or 1) % #list + 1
-		state[what][b.name] = idx
+		state[what][b.name] = (state[what][b.name] or 1) % #list + 1
 		decorate()
 	end
 
@@ -462,11 +413,12 @@ function M.open()
 		end)
 	end
 
+	-- prompt history: index nil is the text typed before <C-p>
 	local history_index = nil
-	local scratch = nil
+	local typed = nil
 	local function show_history(index)
 		history_index = index
-		local text = scratch or {}
+		local text = typed or {}
 		if index then
 			text = vim.split(state.history[index], '\n', { plain = true })
 		end
@@ -477,7 +429,7 @@ function M.open()
 			return
 		end
 		if history_index == nil then
-			scratch = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+			typed = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
 			show_history(#state.history)
 		elseif history_index > 1 then
 			show_history(history_index - 1)
@@ -494,7 +446,9 @@ function M.open()
 		end
 	end
 
-	local function o(desc) return { buffer = buf, desc = desc, noremap = true } end
+	local function map(modes, lhs, rhs, desc)
+		vim.keymap.set(modes, lhs, rhs, { buffer = buf, desc = desc })
+	end
 	local function in_compose(fn)
 		return function()
 			if mode == 'compose' then
@@ -502,50 +456,54 @@ function M.open()
 			end
 		end
 	end
+	local function in_answer(fn, lhs)
+		return function()
+			if mode ~= 'answer' then
+				return lhs
+			end
+			fn()
+			return ''
+		end
+	end
+	local both = { 'i', 'n' }
 	-- <C-CR> doesn't reach nvim through Windows Terminal; <M-CR> and <C-s> do
 	for _, lhs in ipairs({ '<C-CR>', '<M-CR>', '<C-s>' }) do
-		vim.keymap.set({ 'i', 'n' }, lhs, in_compose(function() send() end), o 'Ask: send')
+		map(both, lhs, in_compose(function() send() end), 'Ask: send')
 	end
-	local function send_claudefterm()
+	map(both, '<M-p>', in_compose(function()
 		send(require('genja-ask.backends.claudefterm'))
-	end
-	vim.keymap.set({ 'i', 'n' }, '<M-p>', in_compose(send_claudefterm), o 'Ask: send to the claudefterm')
-	vim.keymap.set('i', '<S-CR>', '<CR>', o 'Ask: newline')
-	vim.keymap.set('i', '<C-j>', '<CR>', o 'Ask: newline')
-	vim.keymap.set({ 'i', 'n' }, '<C-p>', history_prev, o 'Ask: previous prompt')
-	vim.keymap.set({ 'i', 'n' }, '<C-n>', history_next, o 'Ask: next prompt')
-	vim.keymap.set({ 'i', 'n' }, '<C-b>', function() state.brief = not state.brief; decorate() end, o 'Ask: toggle brief')
-	vim.keymap.set({ 'i', 'n' }, '<M-t>', next_target, o 'Ask: next target')
-	vim.keymap.set({ 'i', 'n' }, '<M-m>', function() cycle('model') end, o 'Ask: next model')
-	vim.keymap.set({ 'i', 'n' }, '<M-e>', function() cycle('effort') end, o 'Ask: next effort')
-	vim.keymap.set({ 'i', 'n' }, '<M-s>', save, o 'Ask: save the session')
-	vim.keymap.set({ 'i', 'n' }, '<M-r>', resume, o 'Ask: resume a saved session')
-	vim.keymap.set({ 'i', 'n' }, '<C-c>', function()
+	end), 'Ask: send to the claudefterm')
+	map('i', '<S-CR>', '<CR>', 'Ask: newline')
+	map('i', '<C-j>', '<CR>', 'Ask: newline')
+	map(both, '<C-p>', history_prev, 'Ask: previous prompt')
+	map(both, '<C-n>', history_next, 'Ask: next prompt')
+	map(both, '<C-b>', function()
+		state.brief = not state.brief
+		decorate()
+	end, 'Ask: toggle brief')
+	map(both, '<M-t>', next_target, 'Ask: next target')
+	map(both, '<M-m>', function() cycle('model') end, 'Ask: next model')
+	map(both, '<M-e>', function() cycle('effort') end, 'Ask: next effort')
+	map(both, '<M-s>', save, 'Ask: save the session')
+	map(both, '<M-r>', resume, 'Ask: resume a saved session')
+	map(both, '<C-c>', function()
 		if mode == 'wait' then
 			cancel()
 		else
 			vim.cmd.stopinsert()
 		end
-	end, o 'Ask: cancel')
-	-- normal mode: these keep their usual meaning while composing
-	vim.keymap.set('n', '<CR>', function()
-		if mode == 'answer' then
-			vim.schedule(compose) -- no text changes inside an expr mapping (E565)
-			return ''
-		end
-		return '<CR>'
-	end, { buffer = buf, expr = true, desc = 'Ask: follow-up' })
-	vim.keymap.set('n', 'y', function()
-		if mode == 'answer' then
-			vim.fn.setreg('"', answer)
-			vim.fn.setreg('+', answer)
-			vim.notify(SRC .. 'answer yanked')
-			return ''
-		end
-		return 'y'
-	end, { buffer = buf, expr = true, desc = 'Ask: yank the answer' })
-	vim.keymap.set('n', '<Esc>', close, o 'Ask: close')
-	vim.keymap.set('n', 'q', close, o 'Ask: close')
+	end, 'Ask: cancel')
+	-- normal mode: <CR> and y keep their usual meaning while composing
+	vim.keymap.set('n', '<CR>', in_answer(function()
+		vim.schedule(compose) -- no text changes inside an expr mapping (E565)
+	end, '<CR>'), { buffer = buf, expr = true, desc = 'Ask: follow-up' })
+	vim.keymap.set('n', 'y', in_answer(function()
+		vim.fn.setreg('"', answer)
+		vim.fn.setreg('+', answer)
+		vim.notify(SRC .. 'answer yanked')
+	end, 'y'), { buffer = buf, expr = true, desc = 'Ask: yank the answer' })
+	map('n', '<Esc>', close, 'Ask: close')
+	map('n', 'q', close, 'Ask: close')
 
 	-- leaving the popup closes it; scheduled: no window closing inside WinLeave
 	vim.api.nvim_create_autocmd('WinLeave', {

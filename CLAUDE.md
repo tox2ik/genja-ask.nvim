@@ -12,6 +12,7 @@ code or history: confirm or delete. `Hint:` is a working note for Claude.
 ## Layout
 
 - `lua/genja-ask/init.lua`: `open()`, popup, sessions, history, log (`~/.claude/p-logs/nvim.log`).
+- The float comes from `genja-util.float` (`plug-wip/genja-util.nvim`, a spec dependency).
 - `lua/genja-ask/backends/`: `claude_p.lua` (`claude --print`), `claudefterm.lua` (the project's claude terminal), `cli.lua` (gemini, copilot, aichat).
 - Moved out of the config's `lua/genja/ask.lua` and `lua/genja/ask/backends/`.
 

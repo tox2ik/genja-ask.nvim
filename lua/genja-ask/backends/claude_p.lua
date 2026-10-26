@@ -36,12 +36,6 @@ return {
 		if opts.save_name then
 			vim.list_extend(cmd, { '-n', opts.save_name })
 		end
-		return vim.system(cmd, { stdin = prompt, text = true, cwd = opts.cwd }, vim.schedule_wrap(function(res)
-			if res.code ~= 0 then
-				on_done(vim.trim((res.stderr or '') .. ' (exit ' .. res.code .. ')'))
-				return
-			end
-			on_done(nil, res.stdout or '')
-		end))
+		return require('genja-ask.backends.cli').exec(cmd, prompt, opts.cwd, on_done)
 	end,
 }

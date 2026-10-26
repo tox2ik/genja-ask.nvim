@@ -6,8 +6,8 @@ local SRC = 'genja-ask/claudefterm.lua: '
 ---@type genja-ask.Backend
 return {
 	name = 'claudefterm',
-	models  = { 'opus',  'sonnet', 'haiku',  },
-	efforts = { 'low',   'medium', 'high' },
+	models = { 'opus', 'sonnet', 'haiku' },
+	efforts = { 'low', 'medium', 'high' },
 	sessions = false,
 	sync = true, -- answers right away; no process to wait for
 
