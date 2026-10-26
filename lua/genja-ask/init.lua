@@ -12,6 +12,7 @@
 local SRC = 'genja-ask/init.lua: '
 
 local float = require('genja-util.float')
+local txt = require('genja-util.text')
 
 ---@class genja-ask
 local M = {}
@@ -79,16 +80,6 @@ local state = {
 
 -- {{{ helpers
 
----Random version 4 UUID, for `claude --session-id`.
----@return string
-local function new_uuid()
-	local b = { assert(vim.uv.random(16)):byte(1, 16) }
-	b[7] = b[7] % 16 + 0x40 -- version 4
-	b[9] = b[9] % 64 + 0x80 -- variant 10xx
-	local hex = ('%02x'):rep(16):format(unpack(b))
-	return ('%s-%s-%s-%s-%s'):format(hex:sub(1, 8), hex:sub(9, 12), hex:sub(13, 16), hex:sub(17, 20), hex:sub(21))
-end
-
 ---Session name like the pwsh claude-p's: ISO year . week . weekday-name . HHMM.
 ---@return string
 local function session_name()
@@ -110,26 +101,14 @@ end
 ---@param root string paths are relative to it
 ---@return string|nil text, string|nil label
 local function selection(root)
-	local first = vim.fn.line('v')
-	local last = vim.fn.line('.')
-	if first > last then
-		first, last = last, first
-	end
-	vim.api.nvim_feedkeys(vim.keycode('<Esc>'), 'n', false)
+	local first, last = txt.visual_lines()
 	local file = vim.api.nvim_buf_get_name(0)
 	if file == '' or vim.bo.buftype ~= '' then
 		return nil, nil
 	end
 	local label = (vim.fs.relpath(root, file) or vim.fs.normalize(file)) .. ':' .. first .. '-' .. last
 	local code = table.concat(vim.api.nvim_buf_get_lines(0, first - 1, last, false), '\n')
-	-- a fence longer than any backtick run inside the code
-	local ticks = '```'
-	for run in code:gmatch('`+') do
-		if #run >= #ticks then
-			ticks = ('`'):rep(#run + 1)
-		end
-	end
-	return label .. '\n' .. ticks .. vim.bo.filetype .. '\n' .. code .. '\n' .. ticks .. '\n\n', label
+	return label .. '\n' .. txt.fenced(code, vim.bo.filetype) .. '\n\n', label
 end
 
 ---Append one Q&A to the log.
@@ -192,7 +171,7 @@ function M.open()
 
 	---@type 'compose'|'wait'|'answer'
 	local mode = 'compose'
-	local session = { id = new_uuid(), resume = false, save_name = nil }
+	local session = { id = txt.uuid(), resume = false, save_name = nil }
 	local transcript = {} -- { q, a } pairs, sent along for backends without sessions
 	local answer = ''
 	local job = nil
