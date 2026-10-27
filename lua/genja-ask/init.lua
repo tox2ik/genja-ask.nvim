@@ -182,10 +182,7 @@ function M.open()
 	local height = math.min(8, vim.o.lines - vim.o.cmdheight - 4)
 	local win = float.open(buf, { width = math.min(90, vim.o.columns - 4), height = height, up = 3, left = 8 })
 	vim.wo[win].wrap = true
-	local ok_cmp, cmp = pcall(require, 'cmp')
-	if ok_cmp then
-		cmp.setup.buffer({ enabled = false }) -- a completion menu would take <CR>
-	end
+	vim.b[buf].completion = false -- blink.cmp: a completion menu would take <CR>
 
 	local function backend()
 		return backends()[state.target]
