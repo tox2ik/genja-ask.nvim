@@ -13,7 +13,9 @@ code or history: confirm or delete. `Hint:` is a working note for Claude.
 
 - `lua/genja-ask/init.lua`: `open()`, popup, sessions, history, log (`~/.claude/p-logs/nvim.log`).
 - The float comes from `genja-util.float` (`plug-wip/genja-util.nvim`, a spec dependency).
-- `lua/genja-ask/backends/`: `claude_p.lua` (`claude --print`), `claudefterm.lua` (the project's claude terminal), `cli.lua` (gemini, copilot, aichat).
+- `lua/genja-ask/backends/`: `claude_p.lua` (`claude --print`), `claudefterm.lua` (the project's claude terminal), `cli.lua` (gemini, copilot, aichat, ollama).
+- `cli.lua` wraps the shared backends of `genja-util.nvim/lua/genja-util/llm.lua` (also used by genja-commit's `<M-g>`); claude-p keeps its own for sessions (2026-11-02).
+- ollama: `setup({ ollama = { models, end_point, api_key } })`, the local server by default; untested.
 - Moved out of the config's `lua/genja/ask.lua` and `lua/genja/ask/backends/`.
 
 ## Decisions

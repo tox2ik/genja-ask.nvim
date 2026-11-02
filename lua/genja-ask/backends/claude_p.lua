@@ -36,6 +36,6 @@ return {
 		if opts.save_name then
 			vim.list_extend(cmd, { '-n', opts.save_name })
 		end
-		return require('genja-ask.backends.cli').exec(cmd, prompt, opts.cwd, on_done)
+		return require('genja-util.llm').exec(cmd, prompt, { cwd = opts.cwd }, on_done)
 	end,
 }

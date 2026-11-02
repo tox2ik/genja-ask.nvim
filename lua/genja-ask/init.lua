@@ -6,7 +6,7 @@
 --   waiting:  <C-c> cancel
 --   answer:   <CR> follow-up (same session) · y yank the answer · q/<Esc> close
 -- Targets (backends/): claude-p (claude --print, sessions), claudefterm (the
--- project's claude terminal), gemini, copilot, aichat. Every Q&A goes to ~/.claude/p-logs/nvim.log.
+-- project's claude terminal), gemini, copilot, aichat, ollama. Every Q&A goes to ~/.claude/p-logs/nvim.log.
 -- Saved claude-p sessions are named `nvim yyyy.ww.d-ddd.hhmm` (the pwsh claude-p uses `pwsh ...`).
 
 local SRC = 'genja-ask/init.lua: '
@@ -43,10 +43,16 @@ local FOOTER = {
 ---@field system? string
 ---@field run fun(self: genja-ask.Backend, prompt: string, opts: genja-ask.RunOpts, on_done: fun(err: string|nil, text?: string)): vim.SystemObj|nil
 
+---@class genja-ask.OllamaOpts
+---@field models? string[] <M-m> list, the first is the default; default genja-util.llm.OLLAMA_MODEL
+---@field end_point? string default the local server, genja-util.llm.OLLAMA_END_POINT
+---@field api_key? string|fun(): string|nil
+
 ---@class genja-ask.Opts
 ---Sends to the claudefterm target. `run` carries the popup's choices (model, effort, cwd, ...);
 ---the caller maps them to whatever its terminal takes.
 ---@field send? fun(prompt: string, run: genja-ask.RunOpts)
+---@field ollama? genja-ask.OllamaOpts
 
 ---@type genja-ask.Opts
 M.options = {}
@@ -66,6 +72,7 @@ local function backends()
 		cli.gemini,
 		cli.copilot,
 		cli.aichat,
+		cli.ollama(M.options.ollama or {}),
 	}
 end
 
